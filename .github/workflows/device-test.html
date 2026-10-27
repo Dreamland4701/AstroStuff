@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Device test: storage and camera</title>
+<!--
+DATA HANDLING
+- Purpose: lets you check, on your own phone, (A) how long sessionStorage lasts and (B) whether the camera preview works under a
+  Content-Security-Policy that starts from default-src 'none' with no media-src.
+- Stores one sessionStorage key, "pf-test", holding a number you type and a load counter. Nothing else. No localStorage, cookies or cache.
+- Camera video is shown on screen only. It is not saved, recorded or sent anywhere. Audio is not requested. No network requests are made.
+- Text is inserted with textContent only.
+-->
+<style>
+body{font:1rem/1.45 system-ui,-apple-system,sans-serif;margin:0;padding:1rem;background:#fff;color:#161616;max-width:40rem;margin-inline:auto}
+h1{font-size:1.2rem}h2{font-size:1.05rem;margin-top:1.5rem}
+button,input{font:inherit;min-height:48px;min-width:48px;padding:.4rem .8rem;border:2px solid #6b6b6b;border-radius:6px;background:#fff;color:#161616}
+button{background:#0b4f9c;color:#fff;border-color:#0b4f9c;font-weight:600}
+:focus-visible{outline:3px solid #9a4a00;outline-offset:2px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;border:2px solid #6b6b6b;padding:.5rem;max-height:16rem;overflow:auto;font-size:.85rem}
+video{width:100%;max-height:50vh;background:#000}
+.row{display:flex;gap:.5rem;flex-wrap:wrap;margin:.5rem 0}
+label{display:block;font-weight:600}
+</style>
+</head>
+<body>
+<h1>Device test: storage and camera</h1>
+<p>Open this page in Safari, and again from the Home Screen (Share, then Add to Home Screen). Repeat the steps in each mode and note the results.</p>
+<h2>A. Session storage lifetime</h2>
+<p id="env">Checking…</p>
+<label for="val">A number to keep (for example 12.5)</label>
+<div class="row"><input id="val" type="number" step="any"><button id="save" type="button">Save to session</button><button id="show" type="button">Show saved value</button></div>
+<ol>
+<li>Type a number and press Save.</li>
+<li>Switch to another app for one minute, then return and press Show.</li>
+<li>Lock the screen for one minute, unlock, return and press Show.</li>
+<li>Fully close this app or tab, open it again and press Show. For a Home Screen app, swipe it away in the app switcher first.</li>
+</ol>
+<p>Expected if session storage suits the reticle: kept after steps 2 and 3, gone after step 4. Report what you see.</p>
+<pre id="outA" role="status" aria-live="polite">No result yet.</pre>
+<h2>B. Camera preview and restart</h2>
+<div class="row"><button id="cam" type="button">Start camera</button><button id="stop" type="button">Stop camera</button><button id="info" type="button">Show camera information</button></div>
+<video id="v" playsinline muted autoplay aria-label="Camera preview"></video>
+<ol>
+<li>Press Start camera and allow access. Check that a picture appears. If it stays black, note that the policy of this page may be blocking it.</li>
+<li>Press Show camera information and note which controls are listed.</li>
+<li>Lock the screen for 30 seconds, unlock, and read the event log below.</li>
+</ol>
+<pre id="outB" role="status" aria-live="polite">No result yet.</pre>
+<pre id="log">Event log:</pre>
+<script>
+(function () {
+  'use strict';
+  var $ = function (i) { return document.getElementById(i); }, KEY = 'pf-test', stream = null;
+  function log(t) { $('log').textContent += '\n' + new Date().toLocaleTimeString() + ' ' + t; }
+  function get() { try { var o = JSON.parse(sessionStorage.getItem(KEY)); return o && typeof o === 'object' ? o : null; } catch (e) { return null; } }
+  function put(o) { try { sessionStorage.setItem(KEY, JSON.stringify(o)); return true; } catch (e) { return false; } }
+  var o = get() || {}; o.loads = (typeof o.loads === 'number' ? o.loads : 0) + 1; var stored = put(o);
+  $('env').textContent = 'Home Screen mode: ' + (window.navigator.standalone === true ? 'yes' : 'no') + '. Session storage available: ' + (stored ? 'yes' : 'no') + '. Loads in this session so far: ' + o.loads + '.';
+  $('save').addEventListener('click', function () { var n = parseFloat($('val').value), s = get() || {}; if (!isFinite(n)) { $('outA').textContent = 'Enter a number first.'; return; } s.value = n; s.savedAt = new Date().toLocaleTimeString(); $('outA').textContent = put(s) ? 'Saved ' + n + ' at ' + s.savedAt + '.' : 'Could not save.'; });
+  $('show').addEventListener('click', function () { var s = get(); $('outA').textContent = (s && typeof s.value === 'number') ? 'Found ' + s.value + ' (saved at ' + s.savedAt + '). Loads in this session: ' + s.loads + '.' : 'No saved value found.'; });
+  function onEnded() { log('camera track ended'); }
+  $('cam').addEventListener('click', function () {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { $('outB').textContent = 'No camera API here (needs https).'; return; }
+    navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' } } }).then(function (s) {
+      stream = s; var v = $('v'); v.srcObject = s; var t = s.getVideoTracks()[0]; t.addEventListener('ended', onEnded); t.addEventListener('mute', function () { log('track mute'); }); t.addEventListener('unmute', function () { log('track unmute'); });
+      v.play().catch(function () { }); setTimeout(function () { $('outB').textContent = 'Video size reported: ' + v.videoWidth + ' x ' + v.videoHeight + '. If you can see a picture, the policy allows the camera preview.'; }, 1500); log('camera started');
+    }).catch(function (e) { $('outB').textContent = 'Camera error: ' + (e && e.name ? e.name : 'unknown'); log('camera error'); });
+  });
+  $('stop').addEventListener('click', function () { if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; $('v').srcObject = null; log('camera stopped by button'); });
+  $('info').addEventListener('click', function () { if (!stream) { $('outB').textContent = 'Start the camera first.'; return; } var t = stream.getVideoTracks()[0]; $('outB').textContent = JSON.stringify({ state: t.readyState, settings: t.getSettings(), capabilities: t.getCapabilities ? t.getCapabilities() : 'not supported' }, null, 1); });
+  document.addEventListener('visibilitychange', function () { log('page ' + (document.hidden ? 'hidden' : 'visible') + (stream ? '; stream active: ' + stream.active + '; track: ' + stream.getVideoTracks()[0].readyState : '')); });
+})();
+</script>
+</body>
+</html>
